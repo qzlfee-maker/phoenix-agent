@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { apiRoutes } from './routes.js';
-import { ensurePhoenixDir } from './config.js';
+import { ensurePhoenixDir, loadConfig } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +63,7 @@ export async function findAvailablePort(startPort = 3000, host = '127.0.0.1'): P
 
 export async function createServer(): Promise<FastifyInstance> {
   ensurePhoenixDir();
+  loadConfig();
   const app = Fastify({
     logger: false,
     bodyLimit: 25 * 1024 * 1024, // 25 MB for multimodal base64 attachments

@@ -80,13 +80,44 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ initialConfig, onConfi
     setError(null);
 
     try {
+      const resolvedUrl = apiUrl.trim() || currentProvider.defaultUrl;
+      const trimmedKey = apiKey.trim();
+      const isBuiltIn =
+        selectedProviderId === 'openai' ||
+        selectedProviderId === 'openrouter' ||
+        selectedProviderId === 'gemini';
+
       const updated = await updateConfig({
         provider: selectedProviderId,
-        apiUrl: apiUrl.trim() || currentProvider.defaultUrl,
-        customUrl: selectedProviderId === 'custom' ? apiUrl.trim() : undefined,
-        apiKey: apiKey.trim(),
+        apiUrl: resolvedUrl,
+        customUrl: selectedProviderId === 'custom' ? resolvedUrl : undefined,
+        apiKey: trimmedKey,
         models: finalModels,
         defaultModel: finalModels[0],
+        ...(isBuiltIn
+          ? {
+              builtInProviders: [
+                {
+                  id: selectedProviderId as 'openai' | 'openrouter' | 'gemini',
+                  name: currentProvider.name,
+                  baseUrl: resolvedUrl,
+                  apiKey: trimmedKey,
+                  models: finalModels,
+                },
+              ],
+            }
+          : {
+              customProviders: [
+                ...(initialConfig?.customProviders || []),
+                {
+                  id: selectedProviderId === 'anthropic' ? 'anthropic' : `custom-${Date.now()}`,
+                  name: currentProvider.name,
+                  baseUrl: resolvedUrl,
+                  apiKey: trimmedKey,
+                  models: finalModels,
+                },
+              ],
+            }),
       });
       onConfigured(updated);
     } catch (err: any) {

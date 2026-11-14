@@ -210,6 +210,15 @@ export function loadConfig(): PhoenixConfig | null {
 
     // Hydrate builtInProviders (always present in system, inactive until apiKey is set)
     const rawBuiltIn: any[] = Array.isArray(parsed.builtInProviders) ? parsed.builtInProviders : [];
+    const hasAnyConfiguredBuiltIn = rawBuiltIn.some(
+      (b) => typeof b?.apiKey === 'string' && b.apiKey.trim().length > 0
+    );
+    const hasAnyCustom = Array.isArray(parsed.customProviders) && parsed.customProviders.length > 0;
+    const needsLegacyMigration =
+      !hasAnyConfiguredBuiltIn &&
+      !hasAnyCustom &&
+      (legacyApiKey.length > 0 || (legacyProvider === 'custom' && legacyApiUrl.length > 0));
+
     const builtInProviders: BuiltInProviderConfig[] = DEFAULT_BUILT_IN_PROVIDERS.map((def) => {
       const savedEntry = rawBuiltIn.find((b) => b?.id === def.id);
       const savedKey = typeof savedEntry?.apiKey === 'string' ? savedEntry.apiKey.trim() : '';
@@ -217,7 +226,7 @@ export function loadConfig(): PhoenixConfig | null {
         ? savedEntry.models.filter((m: any) => typeof m === 'string' && m.trim().length > 0)
         : [];
       const shouldMigrateLegacy =
-        !Array.isArray(parsed.builtInProviders) && legacyProvider === def.id && legacyApiKey.length > 0;
+        needsLegacyMigration && legacyProvider === def.id && legacyApiKey.length > 0;
 
       return {
         id: def.id,
@@ -230,7 +239,7 @@ export function loadConfig(): PhoenixConfig | null {
 
     // Hydrate customProviders (unlimited user-defined providers)
     let customProviders: CustomProviderConfig[] = [];
-    if (Array.isArray(parsed.customProviders)) {
+    if (Array.isArray(parsed.customProviders) && parsed.customProviders.length > 0) {
       customProviders = parsed.customProviders
         .filter((c: any) => c && typeof c.name === 'string' && typeof c.baseUrl === 'string')
         .map((c: any) => ({
@@ -242,19 +251,23 @@ export function loadConfig(): PhoenixConfig | null {
             ? c.models.filter((m: any) => typeof m === 'string' && m.trim().length > 0)
             : [],
         }));
-    } else if (legacyProvider === 'custom' && legacyApiUrl) {
+    } else if (
+      needsLegacyMigration &&
+      (legacyProvider === 'custom' || legacyProvider === 'anthropic') &&
+      (legacyApiUrl || parsed.customUrl)
+    ) {
       customProviders = [
         {
-          id: 'custom-default',
-          name: 'Custom / Local',
-          baseUrl: legacyApiUrl,
+          id: legacyProvider === 'anthropic' ? 'anthropic' : 'custom-default',
+          name: legacyProvider === 'anthropic' ? 'Anthropic' : 'Custom / Local',
+          baseUrl: (parsed.customUrl || legacyApiUrl).trim(),
           apiKey: legacyApiKey,
           models,
         },
       ];
     }
 
-    return {
+    const hydratedConfig: PhoenixConfig = {
       apiKey: legacyApiKey,
       apiUrl: legacyApiUrl,
       models,
@@ -267,6 +280,16 @@ export function loadConfig(): PhoenixConfig | null {
       builtInProviders,
       customProviders,
     };
+
+    if (needsLegacyMigration) {
+      try {
+        fs.writeFileSync(configPath, JSON.stringify(hydratedConfig, null, 2), 'utf8');
+      } catch {
+        // Ignore write error during read migration
+      }
+    }
+
+    return hydratedConfig;
   } catch (error) {
     console.error('Failed to read config file:', error);
     return null;
@@ -365,6 +388,46 @@ export function saveConfig(config: Partial<PhoenixConfig> & { model?: string }):
           models: nextModels,
         };
       });
+  }
+
+  // Sync legacy single-provider save payloads into builtInProviders / customProviders
+  if (!Array.isArray(config.builtInProviders) && !Array.isArray(config.customProviders)) {
+    const incomingKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+    const targetProvider = config.provider || current.provider || 'openai';
+    const isBuiltInTarget =
+      targetProvider === 'openai' || targetProvider === 'openrouter' || targetProvider === 'gemini';
+
+    if (isBuiltInTarget && incomingKey) {
+      builtInProviders = builtInProviders.map((b) =>
+        b.id === targetProvider
+          ? {
+              ...b,
+              baseUrl: config.apiUrl?.trim() || b.baseUrl,
+              apiKey: incomingKey,
+              models: models.length > 0 ? models : b.models || [],
+            }
+          : b
+      );
+    } else if (
+      (targetProvider === 'custom' || targetProvider === 'anthropic') &&
+      (incomingKey || config.apiUrl?.trim() || config.customUrl?.trim())
+    ) {
+      const targetId = targetProvider === 'anthropic' ? 'anthropic' : 'custom-default';
+      const targetName = targetProvider === 'anthropic' ? 'Anthropic' : 'Custom / Local';
+      const targetBaseUrl = (config.customUrl || config.apiUrl || DEFAULT_API_URL).trim();
+      const idx = customProviders.findIndex((c) => c.id === targetId);
+      const nextCustom: CustomProviderConfig = {
+        id: targetId,
+        name: idx >= 0 ? customProviders[idx].name : targetName,
+        baseUrl: targetBaseUrl,
+        apiKey: incomingKey || (idx >= 0 ? customProviders[idx].apiKey : ''),
+        models: models.length > 0 ? models : idx >= 0 ? customProviders[idx].models || [] : [],
+      };
+      customProviders =
+        idx >= 0
+          ? customProviders.map((c, i) => (i === idx ? nextCustom : c))
+          : [...customProviders, nextCustom];
+    }
   }
 
   // Keep top-level models synced with all configured providers if models wasn't explicitly set

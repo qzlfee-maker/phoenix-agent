@@ -624,10 +624,13 @@ export const App: React.FC = () => {
     setConfig(newConfig);
     syncActiveModel(newConfig);
     try {
-      const [chatList, projectList] = await Promise.all([
+      const [freshConfig, chatList, projectList] = await Promise.all([
+        fetchConfig(),
         fetchChats(),
         fetchProjects(),
       ]);
+      setConfig(freshConfig);
+      syncActiveModel(freshConfig);
       setChats(chatList);
       setProjects(projectList);
       if (chatList.length > 0) {
