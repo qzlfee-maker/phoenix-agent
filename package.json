@@ -4,7 +4,7 @@
   "description": "Local-first AI agent with web UI and streaming LLM responses",
   "type": "module",
   "bin": {
-    "phoenix-agent": "./bin/cli.js"
+    "phoenix-agent": "bin/cli.js"
   },
   "main": "./dist/server/index.js",
   "files": [
