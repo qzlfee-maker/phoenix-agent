@@ -1,5 +1,5 @@
 {
-  "name": "phoenix-agent",
+  "name": "@qzlfee/phoenix-agent",
   "version": "0.1.0",
   "description": "Local-first AI agent with web UI and streaming LLM responses",
   "type": "module",
